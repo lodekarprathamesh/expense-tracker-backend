@@ -1,17 +1,14 @@
 # Stage 1: Build the application using Maven
-FROM eclipse-temurin:17-jdk-alpine AS build
+FROM maven:3.9.6-eclipse-temurin-17 AS build
 WORKDIR /app
 
-# Copy Maven wrapper and build files
-COPY .mvn/ .mvn
-COPY mvnw pom.xml ./
-
-# Download dependencies (this caches them if dependencies haven't changed)
-RUN ./mvnw dependency:go-offline
+# Copy the pom.xml and download dependencies
+COPY pom.xml ./
+RUN mvn dependency:go-offline
 
 # Copy the source code and build the jar
 COPY src ./src
-RUN ./mvnw clean package -DskipTests
+RUN mvn clean package -DskipTests
 
 # Stage 2: Run the application
 FROM eclipse-temurin:17-jre-alpine
