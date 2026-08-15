@@ -1,0 +1,37 @@
+spring:
+  application:
+    name: expense-tracker-backend
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/expense_tracker
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+server:
+  port: 8080
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:dev-only-change-me-dev-only-change-me-32bytes}
+    expiration-ms: 86400000
+
+logging:
+  level:
+    com.expensetracker: DEBUG
+    org.hibernate.SQL: DEBUG
