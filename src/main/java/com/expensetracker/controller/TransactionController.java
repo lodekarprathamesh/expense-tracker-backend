@@ -18,12 +18,14 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * userId is still part of the URL (keeps the API RESTful and readable), but every
  * endpoint now verifies it matches the authenticated principal from the JWT.
  * A user can only ever read/write their own data.
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/users/{userId}/transactions")
 @RequiredArgsConstructor
@@ -42,13 +44,46 @@ public class TransactionController {
     }
 
     @PostMapping("/auto-capture")
-    public ResponseEntity<TransactionResponse> createFromAutoCapture(
+    public ResponseEntity<?> createFromAutoCapture(
             @PathVariable Long userId,
             @AuthenticationPrincipal CustomUserDetails currentUser,
             @Valid @RequestBody AutoCaptureTransactionRequest request) {
-        requireSelf(userId, currentUser);
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(transactionService.createFromAutoCapture(userId, request));
+
+        log.info("=== STARTING AUTO-CAPTURE REQUEST ===");
+        log.info("Target UserId: {}", userId);
+        log.info("Amount: {}", request.amount());
+        log.info("TransactionType: {}", request.transactionType());
+        log.info("Merchant: {}", request.merchant());
+        log.info("Source: {}", request.source());
+        log.info("SourceReference: {}", request.sourceReference());
+        log.info("TransactionTime: {}", request.transactionTime());
+
+        try {
+            log.info("Step 1: Checking requireSelf authorization...");
+            requireSelf(userId, currentUser);
+
+            log.info("Step 2: Sending data to TransactionService...");
+            TransactionResponse response = transactionService.createFromAutoCapture(userId, request);
+
+            log.info("Step 3: Success! Saved transaction with ID: {}", response.id());
+            return ResponseEntity.status(HttpStatus.CREATED).body(response);
+
+        } catch (Exception e) {
+            log.error("=== 🚨 CRASH DETECTED IN AUTO-CAPTURE 🚨 ===");
+            log.error("Exception Class: {}", e.getClass().getName());
+            log.error("Error Message: {}", e.getMessage());
+            e.printStackTrace();
+
+            String errorMessage = e.getMessage() != null ? e.getMessage() : "Null Error Message";
+            String cause = (e.getCause() != null) ? e.getCause().toString() : "No inner cause";
+
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(java.util.Map.of(
+                            "error", "CRASH: " + errorMessage,
+                            "cause", cause,
+                            "class", e.getClass().getName()
+                    ));
+        }
     }
 
     @GetMapping
