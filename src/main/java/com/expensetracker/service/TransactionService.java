@@ -14,6 +14,7 @@ import com.expensetracker.repository.CategoryRepository;
 import com.expensetracker.repository.TransactionRepository;
 import com.expensetracker.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -56,39 +57,81 @@ public class TransactionService {
         return TransactionResponse.from(transactionRepository.save(transaction));
     }
 
-    @Transactional
-    public TransactionResponse createFromAutoCapture(Long userId, AutoCaptureTransactionRequest request) {
-        User user = getUserOrThrow(userId);
+//    @Transactional
+//    public TransactionResponse createFromAutoCapture(Long userId, AutoCaptureTransactionRequest request) {
+//        User user = getUserOrThrow(userId);
+//
+//        if (request.sourceReference() != null) {
+//            transactionRepository.findByUserIdAndSourceAndSourceReference(
+//                    userId, request.source(), request.sourceReference()
+//            ).ifPresent(existing -> {
+//                throw new DuplicateTransactionException(
+//                        "Transaction already recorded for reference: " + request.sourceReference());
+//            });
+//        }
+//
+//        Transaction transaction = Transaction.builder()
+//                .user(user)
+//                .amount(request.amount())
+//                .transactionType(request.transactionType())
+//                .merchant(request.merchant())
+//                .source(request.source())
+//                .sourceReference(request.sourceReference())
+//                .rawCaptureText(request.rawCaptureText())
+//                .transactionTime(request.transactionTime())
+//                .build();
+//
+//        if (request.accountSuffix() != null) {
+//            accountRepository.findByUserId(userId).stream()
+//                    .filter(a -> request.accountSuffix().equals(a.getAccountSuffix()))
+//                    .findFirst()
+//                    .ifPresent(transaction::setAccount);
+//        }
+//
+//        return TransactionResponse.from(transactionRepository.save(transaction));
+//    }
+@Transactional
+public TransactionResponse createFromAutoCapture(Long userId, AutoCaptureTransactionRequest request) {
+    User user = getUserOrThrow(userId);
 
-        if (request.sourceReference() != null) {
-            transactionRepository.findByUserIdAndSourceAndSourceReference(
-                    userId, request.source(), request.sourceReference()
-            ).ifPresent(existing -> {
-                throw new DuplicateTransactionException(
-                        "Transaction already recorded for reference: " + request.sourceReference());
-            });
-        }
-
-        Transaction transaction = Transaction.builder()
-                .user(user)
-                .amount(request.amount())
-                .transactionType(request.transactionType())
-                .merchant(request.merchant())
-                .source(request.source())
-                .sourceReference(request.sourceReference())
-                .rawCaptureText(request.rawCaptureText())
-                .transactionTime(request.transactionTime())
-                .build();
-
-        if (request.accountSuffix() != null) {
-            accountRepository.findByUserId(userId).stream()
-                    .filter(a -> request.accountSuffix().equals(a.getAccountSuffix()))
-                    .findFirst()
-                    .ifPresent(transaction::setAccount);
-        }
-
-        return TransactionResponse.from(transactionRepository.save(transaction));
+    // Fast-path check — helps avoid unnecessary work, but is NOT the source of truth
+    // under concurrent requests (see catch block below for the real guarantee).
+    if (request.sourceReference() != null) {
+        transactionRepository.findByUserIdAndSourceAndSourceReference(
+                userId, request.source(), request.sourceReference()
+        ).ifPresent(existing -> {
+            throw new DuplicateTransactionException(
+                    "Transaction already recorded for reference: " + request.sourceReference());
+        });
     }
+
+    Transaction transaction = Transaction.builder()
+            .user(user)
+            .amount(request.amount())
+            .transactionType(request.transactionType())
+            .merchant(request.merchant())
+            .source(request.source())
+            .sourceReference(request.sourceReference())
+            .rawCaptureText(request.rawCaptureText())
+            .transactionTime(request.transactionTime())
+            .build();
+
+    if (request.accountSuffix() != null) {
+        accountRepository.findByUserId(userId).stream()
+                .filter(a -> request.accountSuffix().equals(a.getAccountSuffix()))
+                .findFirst()
+                .ifPresent(transaction::setAccount);
+    }
+
+    try {
+        return TransactionResponse.from(transactionRepository.save(transaction));
+    } catch (DataIntegrityViolationException e) {
+        // Lost the race: another concurrent request inserted the same
+        // (userId, source, sourceReference) between our check and our insert.
+        throw new DuplicateTransactionException(
+                "Transaction already recorded for reference: " + request.sourceReference());
+    }
+}
 
     public Page<TransactionResponse> list(Long userId, Pageable pageable) {
         return transactionRepository.findByUserIdOrderByTransactionTimeDesc(userId, pageable)
